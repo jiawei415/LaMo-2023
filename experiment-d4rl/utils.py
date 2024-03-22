@@ -21,7 +21,7 @@ def get_optimizer(args, model):
                                 )
                                 for module in model.children()
                                 if (
-                                    ("transformers" in str(type(module)).lower())
+                                    ("transformer" in str(type(module)).lower())
                                     or ("dataparallel" in str(type(module)).lower())
                                 )
                             ]
@@ -46,7 +46,7 @@ def get_optimizer(args, model):
                                 )
                                 for module in model.children()
                                 if (
-                                    ("transformers" not in str(type(module)).lower())
+                                    ("transformer" not in str(type(module)).lower())
                                     and (
                                         "dataparallel" not in str(type(module)).lower()
                                     )

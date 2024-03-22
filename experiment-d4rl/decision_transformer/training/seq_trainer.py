@@ -33,7 +33,6 @@ class SequenceTrainer(Trainer):
         action_target = action_target.reshape(-1, act_dim)[
             attention_mask.reshape(-1) > 0
         ]
-       
         loss = self.loss_fn(
             None,
             action_preds,
@@ -43,11 +42,10 @@ class SequenceTrainer(Trainer):
             None,
         )
 
-        batch = next(self.train_nlp_dataset)
-        lm_out = self.model.transformer_model(**batch)
-        lm_loss = lm_out.loss
-        
-        if self.args["co_training"]:
+        if self.model.use_llm and self.args["co_training"]:
+            batch = next(self.train_nlp_dataset)
+            lm_out = self.model.transformer_model(**batch)
+            lm_loss = lm_out.loss
             loss += self.args["co_lambda"] * lm_loss
         
         self.optimizer.zero_grad()
@@ -60,4 +58,4 @@ class SequenceTrainer(Trainer):
                 torch.mean((action_preds - action_target) ** 2).detach().cpu().item()
             )
 
-        return loss.detach().cpu().item()#, lm_loss.detach().cpu().item()
+        return loss.detach().cpu().item(), lm_loss.detach().cpu().item() if self.model.use_llm else 0

@@ -9,6 +9,9 @@ import random
 import sys
 import os
 import loralib as lora
+import pprint
+import traceback
+import time
 from decision_transformer.evaluation.evaluate_episodes import (
     evaluate_episode,
     evaluate_episode_rtg,
@@ -19,6 +22,7 @@ from decision_transformer.training.act_trainer import ActTrainer
 from decision_transformer.training.seq_trainer import SequenceTrainer
 from get_nlp_datasets import get_dataset
 from utils import get_optimizer
+from logger import init_wandb, init_logger, Logger
 
 def discount_cumsum(x, gamma):
     discount_cumsum = np.zeros_like(x)
@@ -28,16 +32,19 @@ def discount_cumsum(x, gamma):
     return discount_cumsum
 
 def experiment(
-    exp_prefix,
+    # exp_prefix,
     variant,
+    logger: Logger,
 ):
     torch.manual_seed(variant["seed"])
     os.makedirs(variant["outdir"], exist_ok=True)
     device = variant.get("device", "cuda")
     log_to_wandb = variant.get("log_to_wandb", False)
+    if log_to_wandb:
+        init_wandb(variant)
 
     if variant["co_training"]:
-        print("co training with lambda="+str(variant["co_lambda"]))
+        logger.info("co training with lambda="+str(variant["co_lambda"]))
         
     train_nlp_dataloader, eval_nlp_dataloader = get_dataset(
         dataset_name=variant["nlp_dataset_name"],
@@ -46,25 +53,25 @@ def experiment(
     
     env_name, dataset = variant["env"], variant["dataset"]
     model_type = variant["model_type"]
-    description = variant["description"]
-    seed = variant["seed"]
-    group_name = f"{env_name}-{dataset}-{model_type}-{description}"
-    exp_prefix = f"{seed}-{random.randint(int(1e5), int(1e6) - 1)}"
+    # description = variant["description"]
+    # seed = variant["seed"]
+    # group_name = f"{env_name}-{dataset}-{model_type}-{description}"
+    # exp_prefix = f"{seed}-{random.randint(int(1e5), int(1e6) - 1)}"
     
     if env_name == "hopper":
         env = gym.make("hopper-medium-v2")
         max_ep_len = 1000
-        env_targets = [3600, 2600, 2200, 1800]  # evaluation conditioning targets
+        env_targets = [3600, 1800]  # evaluation conditioning targets
         scale = 1000.0  # normalization for rewards/returns
     elif env_name == "halfcheetah":
         env = gym.make("halfcheetah-medium-v2")
         max_ep_len = 1000
-        env_targets = [12000, 8000, 6000, 4500]
+        env_targets = [12000, 6000]
         scale = 1000.0
     elif env_name == "walker2d":
         env = gym.make("walker2d-medium-v2")
         max_ep_len = 1000
-        env_targets = [5000, 4000, 3000, 2500]
+        env_targets = [5000, 2500]
         scale = 1000.0
     elif env_name == 'reacher2d':
         from decision_transformer.envs.reacher_2d import Reacher2dEnv
@@ -91,10 +98,11 @@ def experiment(
     # load dataset
     data_suffix = variant["data_suffix"]
     ratio_str = "-" + str(variant["sample_ratio"]) + data_suffix if variant["sample_ratio"] < 1 else ""
+    dataset_path = os.path.join(variant["dataset_path"], "original" if variant["corruption_mode"] == "none" else "attacked")
     if env_name in ["walker2d", "hopper", "halfcheetah", "reacher2d"]:
-        dataset_path = f"../data/mujoco/{env_name}-{dataset}{ratio_str}-v2.pkl"
+        dataset_path = f"{dataset_path}/{env_name}-{dataset}{ratio_str}-v2.pkl"
     elif env_name == "kitchen":
-        dataset_path = f"../data/kitchen/{env_name}-{dataset}{ratio_str}-v0.pkl"
+        dataset_path = f"{dataset_path}/{env_name}-{dataset}{ratio_str}-v0.pkl"
     else: 
         raise NotImplementedError
     with open(dataset_path, "rb") as f:
@@ -119,12 +127,12 @@ def experiment(
 
     num_timesteps = sum(traj_lens)
 
-    print("=" * 50)
-    print(f"Starting new experiment: {env_name} {dataset}")
-    print(f"{len(traj_lens)} trajectories, {num_timesteps} timesteps found")
-    print(f"Average return: {np.mean(-returns):.2f}, std: {np.std(returns):.2f}")
-    print(f"Max return: {np.max(-returns):.2f}, min: {np.min(-returns):.2f}")
-    print("=" * 50)
+    logger.info("=" * 50)
+    logger.info(f"Starting new experiment: {env_name} {dataset}")
+    logger.info(f"{len(traj_lens)} trajectories, {num_timesteps} timesteps found")
+    logger.info(f"Average return: {np.mean(-returns):.2f}, std: {np.std(returns):.2f}")
+    logger.info(f"Max return: {np.max(-returns):.2f}, min: {np.min(-returns):.2f}")
+    logger.info("=" * 50)
 
     K = variant["K"]
     batch_size = variant["batch_size"]
@@ -234,7 +242,8 @@ def experiment(
     def eval_episodes(target_rew, visualize):
         def fn(model):
             returns, lengths, video_paths = [], [], []
-            os.makedirs(os.path.join(variant["outdir"], "videos", str(target_rew)), exist_ok=True)
+            if visualize:
+                os.makedirs(os.path.join(variant["outdir"], "videos", str(target_rew)), exist_ok=True)
             for episode_index in range(num_eval_episodes):
                 record_video = (episode_index % (num_eval_episodes // 5) == 0) & visualize
                 # if dir doesn't exist, make it
@@ -284,7 +293,7 @@ def experiment(
                 f"target_{target_rew}_length_mean": np.mean(lengths),
                 f"target_{target_rew}_length_std": np.std(lengths),
                 f"target_{target_rew}_noromalized_return_mean": env.get_normalized_score(np.mean(returns)),
-                f"target_{target_rew}_videos": [wandb.Video(video_path, fps=30, format="mp4") for video_path in video_paths]
+                # f"target_{target_rew}_videos": [wandb.Video(video_path, fps=30, format="mp4") for video_path in video_paths]
             }
 
         return fn
@@ -312,26 +321,26 @@ def experiment(
                 for param in model.parameters():
                     param.requires_grad = False
             else:
-                print("adapt lora.")
+                logger.info("adapt lora.")
                 lora.mark_only_lora_as_trainable(model, bias='lora_only')
                 # lora.mark_only_lora_as_trainable(model, bias='all')
                 # NOTE: Don't put this part below other adaptation part.
             if variant["adapt_wte"]:
-                print("adapt wte.")
+                logger.info("adapt wte.")
                 for param in model.transformer.wte.parameters():
                     param.requires_grad = True
             if variant["adapt_wpe"]:
-                print("adapt wpe.")
+                logger.info("adapt wpe.")
                 for param in model.transformer.wpe.parameters():
                     param.requires_grad = True
             if variant["adapt_embed"]:
-                print("adapt embeddings.")
+                logger.info("adapt embeddings.")
                 # adapt the embeddings in DecisionTransformer
                 for name, param in model.named_parameters():
                     if ("embed" in name or "predict" in name):
                         param.requires_grad = True
             if variant["adapt_ln"]:
-              print("adapt layer norms.")
+              logger.info("adapt layer norms.")
               # adapt the LayerNorm in the transformer's blocks
               for block in model.transformer.h:
                   for param in block.ln_1.parameters():
@@ -342,29 +351,29 @@ def experiment(
               for param in model.transformer.ln_f.parameters():
                   param.requires_grad = True
             if variant["adapt_attn"]:
-                print("adapt attention.")
+                logger.info("adapt attention.")
                 for block in model.transformer.h:
                 # adapt the attention weights and biases
                     for param in block.attn.parameters():
                         param.requires_grad = True
             if variant["adapt_ff"]:
-                print("adapt feed-forward.")
+                logger.info("adapt feed-forward.")
                 for block in model.transformer.h:
                     # adapt the feed_forward weights and biases
                     for param in block.mlp.parameters():
                         param.requires_grad = True
             if variant["only_adapt_last_two_blocks"]:
-                print("for transformer, only adapt the last two blocks.")
+                logger.info("for transformer, only adapt the last two blocks.")
                 for block in model.transformer.h[0:-2]:
                     for param in block.parameters():
                         param.requires_grad = False
             if variant["adapt_last_two_blocks"]:
-                print("for transformer, adapt the last two blocks.")
+                logger.info("for transformer, adapt the last two blocks.")
                 for block in model.transformer.h[-2:]:
                     for param in block.parameters():
                         param.requires_grad = True
         else: 
-            print("fintune all.")
+            logger.info("fintune all.")
             
     elif model_type == "bc":
         model = MLPBCModel(
@@ -377,17 +386,21 @@ def experiment(
     else:
         raise NotImplementedError
 
+    param_dict = {"Trainable": [], "Frozen": []}
     trainable_param_size = 0
     frozen_param_size = 0
     for name, param in model.named_parameters():
-        if "transformer" not in name: continue
+        # if "transformer" not in name: continue
         if param.requires_grad:
             trainable_param_size += param.numel()
+            param_dict["Trainable"].append(name)
         else:
             frozen_param_size += param.numel()
-    print(f"Trainable parameters: {trainable_param_size}")
-    print(f"Frozen parameters: {frozen_param_size}")
-    print(f"Trainable ratio: {trainable_param_size/(trainable_param_size + frozen_param_size)}")
+            param_dict["Frozen"].append(name)
+    logger.info(pprint.pformat(param_dict))
+    logger.info(f"Trainable parameters: {trainable_param_size}")
+    logger.info(f"Frozen parameters: {frozen_param_size}")
+    logger.info(f"Trainable ratio: {trainable_param_size/(trainable_param_size + frozen_param_size)}")
     
     model = model.to(device=device)
 
@@ -427,28 +440,32 @@ def experiment(
             eval_fns=[eval_episodes(tar, visualize) for tar in env_targets],
         )
 
-    if log_to_wandb:
-        wandb.init(
-            name=exp_prefix,
-            group=group_name,
-            # NOTE: fill in the name of your own wandb project
-            entity="your-group-name",
-            project="your-project-name",
-            config=variant,
-        )
-        # wandb.watch(model)  # wandb has some bug
+    eval_logs = trainer.eval_step()
+    logger.record("Iteration", 0)
+    for k, v in eval_logs.items():
+        logger.record(k, v)
+    logger.dump(0)
 
     total_training_time = 0
-    for iter in range(variant["max_iters"]):
-        print("HI!")
-        outputs = trainer.train_iteration(
-            num_steps=variant["num_steps_per_iter"], iter_num=iter + 1, print_logs=True
+    for iter in range(1, variant["max_iters"] + 1):
+        # logger.info("HI!")
+        train_logs, eval_logs = trainer.train_iteration(
+            num_steps=variant["num_steps_per_iter"], iter_num=iter, print_logs=False
         )
-        print("HI2!")
-        total_training_time += outputs["time/training"]
-        outputs["time/total_training_time"] = total_training_time
+        # logger.info("HI2!")
+        total_training_time += train_logs["time/training"]
+        train_logs["time/total_training_time"] = total_training_time
+
+        logger.record("Iteration", iter)
+        for k, v in eval_logs.items():
+            logger.record(k, v)
+        for k, v in train_logs.items():
+            logger.record(k, v)
+        logger.dump(0)
+
         if log_to_wandb:
-            wandb.log(outputs)
+            wandb.log(train_logs)
+            wandb.log(eval_logs)
 
 
 if __name__ == "__main__":
@@ -470,11 +487,13 @@ if __name__ == "__main__":
     parser.add_argument("--data_suffix", type=str, default="d1")
     # training
     parser.add_argument("--device", type=str, default="cuda")
+    parser.add_argument("--fp16", action="store_true", default=False)
     parser.add_argument("--log_to_wandb", "-w", action="store_true", default=False)
     parser.add_argument("--visualize", "-v", action="store_true", default=False)
     parser.add_argument("--seed", type=int, default=666)
-    parser.add_argument("--outdir", type=str, default=None)
-    parser.add_argument("--fp16", action="store_true", default=False)
+    parser.add_argument("--group", type=str, default="20240322")
+    parser.add_argument("--outdir", type=str, default="./results/rdt_sz")
+    parser.add_argument("--alg_type", type=str, default="lamo")
     parser.add_argument("--description", type=str, default="")
     # architecture, don't need to care about in our method
     parser.add_argument("--embed_dim", type=int, default=128)
@@ -486,33 +505,53 @@ if __name__ == "__main__":
     # learning hyperparameters
     parser.add_argument("--dropout", type=float, default=0.1)
     parser.add_argument("--learning_rate", "-lr", type=float, default=1e-4)
-    parser.add_argument("--lm_learning_rate", "-lmlr", type=float, default=None)
-    parser.add_argument("--weight_decay", "-wd", type=float, default=1e-4)
-    parser.add_argument("--warmup_steps", type=int, default=10000)
-    parser.add_argument("--num_eval_episodes", type=int, default=100)
-    parser.add_argument("--max_iters", type=int, default=40)
-    parser.add_argument("--num_steps_per_iter", type=int, default=2500)
+    parser.add_argument("--lm_learning_rate", "-lmlr", type=float, default=1e-5)
+    parser.add_argument("--weight_decay", "-wd", type=float, default=1e-5)
+    parser.add_argument("--warmup_steps", type=int, default=2500)
+    parser.add_argument("--num_eval_episodes", type=int, default=20)
+    parser.add_argument("--max_iters", type=int, default=50)
+    parser.add_argument("--num_steps_per_iter", type=int, default=2000)
     # implementations
-    parser.add_argument("--pretrained_lm", type=str, default=None)
-    parser.add_argument("--mlp_embedding", action="store_true", default=False)
+    parser.add_argument("--pretrained_lm", type=str, default="gpt2")
+    parser.add_argument("--mlp_embedding", action="store_true", default=True)
     # adaptations
-    parser.add_argument("--adapt_mode", action="store_true", default=False)
-    parser.add_argument("--lora", action="store_true", default=False)
+    parser.add_argument("--adapt_mode", action="store_true", default=True)
+    parser.add_argument("--lora", action="store_true", default=True)
     parser.add_argument("--only_adapt_last_two_blocks", action="store_true", default=False)
     parser.add_argument("--adapt_last_two_blocks", action="store_true", default=False)
     parser.add_argument("--adapt_ln", action="store_true", default=False)
     parser.add_argument("--adapt_attn", action="store_true", default=False)
     parser.add_argument("--adapt_ff", action="store_true", default=False)
-    parser.add_argument("--adapt_embed", action="store_true", default=False)
+    parser.add_argument("--adapt_embed", action="store_true", default=True)
     parser.add_argument("--adapt_wte", action="store_true", default=False)
     parser.add_argument("--adapt_wpe", action="store_true", default=False)
     # lm co-training
-    parser.add_argument("--co_training", action="store_true", default=False)
     parser.add_argument("--nlp_dataset_name", type=str, default="wikitext")
     parser.add_argument(
         "--nlp_dataset_config_name", type=str, default="wikitext-103-raw-v1"
     )
+    parser.add_argument("--co_training", action="store_true", default=True)
     parser.add_argument("--co_lambda", type=float, default=0.1)
     
+    # dataset attack
+    parser.add_argument('--dataset_path', default="/apdcephfs/share_1563664/ztjiaweixu/datasets/RDT", type=str)
+    parser.add_argument('--corruption_agent', default="EDAC", type=str)
+    parser.add_argument('--corruption_mode', default="none", type=str)
+    parser.add_argument('--corruption_seed', default=2023, type=int)
+    parser.add_argument('--corruption_obs', default=1, type=float)
+    parser.add_argument('--corruption_act', default=0, type=float)
+    parser.add_argument('--corruption_rew', default=0, type=float)
+    parser.add_argument('--corruption_next_obs', default=0, type=float)
+    parser.add_argument('--corruption_rate', default=0.3, type=float)
+    parser.add_argument('--use_original', default=0, type=int, choices=[0, 1])
+    parser.add_argument('--same_index', default=0, type=int, choices=[0, 1])
+    parser.add_argument('--froce_attack', default=0, type=int, choices=[0, 1])
+
     args = parser.parse_args()
-    experiment("d4rl-experiment", variant=vars(args))
+    logger = init_logger(args)
+    # experiment(variant=vars(args), logger=logger)
+    try:
+        experiment(variant=vars(args), logger=logger)
+    except Exception:
+        error_info = traceback.format_exc()
+        logger.error(f"\n{error_info}")

@@ -19,6 +19,7 @@ class Trainer:
         scheduler=None,
         eval_fns=None,
         eval_only=False,
+        save_model=False,
     ):
         self.args = args
         self.model = model
@@ -32,6 +33,7 @@ class Trainer:
         self.eval_fns = [] if eval_fns is None else eval_fns
         self.diagnostics = dict()
         self.eval_only = eval_only
+        self.save_model = save_model
         self.eval_nlp_dataset = cycle(iter(eval_nlp_dataset))
         self.train_nlp_dataset = cycle(iter(train_nlp_dataset))
 
@@ -40,62 +42,68 @@ class Trainer:
     def train_iteration(self, num_steps, iter_num=0, print_logs=False):
 
         train_losses = []
-        # lm_losses = []
+        lm_losses = []
         logs = dict()
 
         train_start = time.time()
 
         if not self.eval_only:
             self.model.train()
-            mean_loss = 0
             progress_bar = tqdm.tqdm(range(num_steps), desc=f"Training")
             for _ in progress_bar:
-                # train_loss, lm_loss = self.train_step()
+                train_loss, lm_loss = self.train_step()
                 train_loss = self.train_step()
                 train_losses.append(train_loss)
-                # lm_losses.append(lm_loss)
+                lm_losses.append(lm_loss)
                 if self.scheduler is not None:
                     self.scheduler.step()
 
                 logs["time/training"] = time.time() - train_start
                 logs["training/train_loss_mean"] = np.mean(train_losses)
                 logs["training/train_loss_std"] = np.std(train_losses)
-                # logs["training/lm_loss_mean"] = np.mean(lm_losses)
-                # logs["training/lm_loss_std"] = np.std(lm_losses)
+                logs["training/lm_loss_mean"] = np.mean(lm_losses)
+                logs["training/lm_loss_std"] = np.std(lm_losses)
                 
                 progress_bar.set_postfix({"loss": logs["training/train_loss_mean"], "lr": self.optimizer.param_groups[0]['lr']})
                 
 
-        eval_start = time.time()
-
-        self.model.eval()
-        for eval_fn in tqdm.tqdm(self.eval_fns, desc="Evaluating"):
-            outputs = eval_fn(self.model)
-            print(outputs)
-            for k, v in outputs.items():
-                print(k,":",v)
-                logs[f"evaluation/{k}"] = v
-
-        if not self.eval_only:
-            logs["time/total"] = time.time() - self.start_time
-        logs["time/evaluation"] = time.time() - eval_start
-
         for k in self.diagnostics:
             logs[k] = self.diagnostics[k]
+
+        eval_logs = self.eval_step()
 
         if print_logs:
             print("=" * 80)
             print(f"Iteration {iter_num}")
             for k, v in logs.items():
                 print(f"{k}: {v}")
+            for k, v in eval_logs.items():
+                print(f"{k}: {v}")
 
-        if not self.eval_only:
+        if not self.eval_only and self.save_model:
             if self.args.get("outdir") and iter_num % 5 == 0:
                 torch.save(
                     self.model.state_dict(),
                     f"{self.args['outdir']}/model_{iter_num}.pt",
                 )
+        if not self.eval_only:
+            logs["time/total"] = time.time() - self.start_time
 
+        return logs, eval_logs
+
+    def eval_step(self):
+        logs = dict()
+        eval_start = time.time()
+
+        self.model.eval()
+        for eval_fn in tqdm.tqdm(self.eval_fns, desc="Evaluating"):
+            outputs = eval_fn(self.model)
+            # print(outputs)
+            for k, v in outputs.items():
+                # print(k,":",v)
+                logs[f"evaluation/{k}"] = v
+
+        logs["time/evaluation"] = time.time() - eval_start
         return logs
 
     def train_step(self):

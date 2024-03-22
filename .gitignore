@@ -7,3 +7,5 @@ tmp
 *.mp4
 experiment-d4rl/data
 experiment-atari/runs
+result*
+taiji

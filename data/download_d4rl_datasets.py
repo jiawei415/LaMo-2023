@@ -1,12 +1,14 @@
+from tqdm import tqdm
 import numpy as np
 import collections
 import pickle
 import d4rl
 import gym
+import os
 
 mujoco_list = ["hopper", "walker2d", "halfcheetah"]
 kitchen_list = ["kitchen"]
-all_list = mujoco_list + kitchen_list
+all_list = mujoco_list # + kitchen_list
 
 for env_name in all_list:
     type_list = ["medium"] if env_name in mujoco_list else ["complete", "partial"]
@@ -16,7 +18,9 @@ for env_name in all_list:
         name = f"{env_name}-{dataset_type}-" + version
         print(f"Loading {name}...")
         env = gym.make(name)
-        dataset = d4rl.qlearning_dataset(env)
+        h5path = os.path.join("/data/ztjiaweixu/.d4rl/datasets", f"{env_name}_{dataset_type}-{version}.hdf5")
+        dataset = env.get_dataset(h5path=h5path)
+        # dataset = d4rl.qlearning_dataset(env, h5path=h5path)
 
         N = dataset["rewards"].shape[0]
         data_ = collections.defaultdict(list)
@@ -27,7 +31,7 @@ for env_name in all_list:
 
         episode_step = 0
         paths = []
-        for i in range(N):
+        for i in tqdm(range(N)):
             done_bool = bool(dataset["terminals"][i])
             if use_timeouts:
                 final_timestep = dataset["timeouts"][i]
@@ -57,5 +61,5 @@ for env_name in all_list:
             f"Trajectory returns: mean = {np.mean(returns)}, std = {np.std(returns)}, max = {np.max(returns)}, min = {np.min(returns)}"
         )
 
-        with open(f"{path_prefix}/{name}.pkl", "wb") as f:
+        with open(f"/data/ztjiaweixu/Code/Corruption/LaMo-2023/data/{path_prefix}/{name}.pkl", "wb") as f:
             pickle.dump(paths, f)

@@ -31,7 +31,7 @@ import functools
 
 import datasets
 import torch
-from datasets import load_dataset
+from datasets import load_dataset, load_from_disk
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
@@ -77,6 +77,7 @@ def get_dataset(
     per_device_train_batch_size=2,
     per_device_eval_batch_size=2,
     shuffle_words=False,
+    debug_mode=False,
 ):
     accelerator = Accelerator()
 
@@ -91,7 +92,12 @@ def get_dataset(
     # download the dataset.
     if dataset_name is not None:
         # Downloading and loading a dataset from the hub.
-        raw_datasets = load_dataset(dataset_name, dataset_config_name)
+        dataset_path = f"/apdcephfs/share_1563664/ztjiaweixu/huggingface/{dataset_name}"
+        if debug_mode:
+            raw_datasets = load_dataset(dataset_name, dataset_config_name)
+            # raw_datasets.save_to_disk(dataset_path)
+        else:
+            raw_datasets = raw_datasets = load_from_disk(dataset_path)
         if "validation" not in raw_datasets.keys():
             raw_datasets["validation"] = load_dataset(
                 dataset_name,
@@ -134,7 +140,12 @@ def get_dataset(
     # https://huggingface.co/docs/datasets/loading_datasets.html.
 
     # Load pretrained model and tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, use_fast=True)
+    tokenizer_path = f"/apdcephfs/share_1563664/ztjiaweixu/huggingface/tokenizer_{tokenizer_name}"
+    if debug_mode:
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, use_fast=True)
+        # tokenizer.save_pretrained(tokenizer_path)
+    else:
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, use_fast=True)
 
     # Preprocessing the datasets.
     # First we tokenize all the texts.
