@@ -11,7 +11,9 @@ import os
 import loralib as lora
 import pprint
 import traceback
+import collections
 import time
+from tqdm import tqdm
 from decision_transformer.evaluation.evaluate_episodes import (
     evaluate_episode,
     evaluate_episode_rtg,
@@ -23,6 +25,62 @@ from decision_transformer.training.seq_trainer import SequenceTrainer
 from get_nlp_datasets import get_dataset
 from utils import get_optimizer
 from logger import init_wandb, init_logger, Logger
+from attack import attack_dataset
+
+
+def load_d4rl_dataset(variant, logger):
+    env_name = f"{variant['env']}-{variant['dataset']}-v2"
+    h5path = (
+        variant["dataset_path"]
+        if variant["dataset_path"] is None
+        else os.path.expanduser(f"{variant['dataset_path']}/{env_name}.hdf5")
+    )
+    dataset = gym.make(env_name).get_dataset(h5path=h5path)
+    # dataset = d4rl.qlearning_dataset(env, h5path=h5path)
+    if variant["corruption_mode"] != "none":
+        variant['env'] = env_name
+        dataset, _ = attack_dataset(variant, dataset, logger)
+
+    N = dataset["rewards"].shape[0]
+    data_ = collections.defaultdict(list)
+
+    use_timeouts = False
+    if "timeouts" in dataset:
+        use_timeouts = True
+
+    episode_step = 0
+    paths = []
+    for i in tqdm(range(N)):
+        done_bool = bool(dataset["terminals"][i])
+        if use_timeouts:
+            final_timestep = dataset["timeouts"][i]
+        else:
+            final_timestep = episode_step == 1000 - 1
+        for k in [
+            "observations",
+            "actions",
+            "rewards",
+            "terminals",
+            "next_observations"
+        ]:
+            data_[k].append(dataset[k][i])
+        if done_bool or final_timestep:
+            episode_step = 0
+            episode_data = {}
+            for k in data_:
+                episode_data[k] = np.array(data_[k])
+            paths.append(episode_data)
+            data_ = collections.defaultdict(list)
+        episode_step += 1
+
+    returns = np.array([np.sum(p["rewards"]) for p in paths])
+    num_samples = np.sum([p["rewards"].shape[0] for p in paths])
+    logger.info(f"Number of samples collected: {num_samples}")
+    logger.info(
+        f"Trajectory returns: mean = {np.mean(returns)}, std = {np.std(returns)}, max = {np.max(returns)}, min = {np.min(returns)}"
+    )
+    return paths
+
 
 def discount_cumsum(x, gamma):
     discount_cumsum = np.zeros_like(x)
@@ -96,17 +154,18 @@ def experiment(
     act_dim = env.action_space.shape[0]
 
     # load dataset
-    data_suffix = variant["data_suffix"]
-    ratio_str = "-" + str(variant["sample_ratio"]) + data_suffix if variant["sample_ratio"] < 1 else ""
-    dataset_path = os.path.join(variant["dataset_path"], "original" if variant["corruption_mode"] == "none" else "attacked")
-    if env_name in ["walker2d", "hopper", "halfcheetah", "reacher2d"]:
-        dataset_path = f"{dataset_path}/{env_name}-{dataset}{ratio_str}-v2.pkl"
-    elif env_name == "kitchen":
-        dataset_path = f"{dataset_path}/{env_name}-{dataset}{ratio_str}-v0.pkl"
-    else: 
-        raise NotImplementedError
-    with open(dataset_path, "rb") as f:
-        trajectories = pickle.load(f)
+    trajectories = load_d4rl_dataset(variant, logger)
+    # data_suffix = variant["data_suffix"]
+    # ratio_str = "-" + str(variant["sample_ratio"]) + data_suffix if variant["sample_ratio"] < 1 else ""
+    # dataset_path = os.path.join(variant["dataset_path"], "original" if variant["corruption_mode"] == "none" else "attacked")
+    # if env_name in ["walker2d", "hopper", "halfcheetah", "reacher2d"]:
+    #     dataset_path = f"{dataset_path}/{env_name}-{dataset}{ratio_str}-v2.pkl"
+    # elif env_name == "kitchen":
+    #     dataset_path = f"{dataset_path}/{env_name}-{dataset}{ratio_str}-v0.pkl"
+    # else:
+    #     raise NotImplementedError
+    # with open(dataset_path, "rb") as f:
+    #     trajectories = pickle.load(f)
     
     # save all path information into separate lists
     mode = variant.get("mode", "normal")
@@ -534,7 +593,7 @@ if __name__ == "__main__":
     parser.add_argument("--co_lambda", type=float, default=0.1)
     
     # dataset attack
-    parser.add_argument('--dataset_path', default="/apdcephfs/share_1563664/ztjiaweixu/datasets/RDT", type=str)
+    parser.add_argument('--dataset_path', default="/apdcephfs/share_1563664/ztjiaweixu/datasets", type=str)
     parser.add_argument('--corruption_agent', default="EDAC", type=str)
     parser.add_argument('--corruption_mode', default="none", type=str)
     parser.add_argument('--corruption_seed', default=2023, type=int)
