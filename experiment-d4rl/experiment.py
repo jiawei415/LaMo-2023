@@ -79,6 +79,11 @@ def load_d4rl_dataset(variant, logger):
     logger.info(
         f"Trajectory returns: mean = {np.mean(returns)}, std = {np.std(returns)}, max = {np.max(returns)}, min = {np.min(returns)}"
     )
+    if variant["sample_ratio"] < 1:
+        logger.info(f"Sample Ratio: {variant['sample_ratio']}")
+        logger.info("Before:", len(paths))
+        paths = random.sample(paths, int(len(paths) * variant["sample_ratio"]))
+        logger.info("After:", len(paths))
     return paths
 
 
