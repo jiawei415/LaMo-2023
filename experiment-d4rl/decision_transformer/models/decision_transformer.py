@@ -108,7 +108,6 @@ class DecisionTransformer(TrajectoryModel):
         if args["pretrained_lm"] is not None:
             print("Loading from pretrained "+args["pretrained_lm"]+" model")
             if args['lora']:
-                # name_or_path = f"/data/ztjiaweixu/Code/Corruption/{args['pretrained_lm']}"
                 name_or_path = f"/apdcephfs/share_1563664/ztjiaweixu/huggingface/{args['pretrained_lm']}"
                 if not os.path.exists(name_or_path):
                     pretrained_name_or_path = args['pretrained_lm']
@@ -202,10 +201,10 @@ class DecisionTransformer(TrajectoryModel):
         else:
           if args["share_input_output_proj"]:
             # self.predict_state = lambda x: F.linear(x, self.embed_state.weight.t())
-            self.predict_return = lambda x: F.linear(x, self.embed_return.weight.t())
-            # self.predict_action = lambda x: F.tanh(
-            #     F.linear(x, self.embed_action.weight.t())
-            # )
+            # self.predict_return = lambda x: F.linear(x, self.embed_return.weight.t())
+            self.predict_action = lambda x: F.tanh(
+                F.linear(x, self.embed_action.weight.t())
+            )
           else:
             # self.predict_state = torch.nn.Linear(hidden_size, self.state_dim)
             self.predict_action = nn.Sequential(
@@ -348,7 +347,7 @@ class DecisionTransformer(TrajectoryModel):
                     states,
                 ],
                 dim=1,
-            ).to(dtype=torch.float32)
+            ).to(dtype=states.dtype)
             actions = torch.cat(
                 [
                     torch.zeros(
@@ -362,7 +361,7 @@ class DecisionTransformer(TrajectoryModel):
                     actions,
                 ],
                 dim=1,
-            ).to(dtype=torch.float32)
+            ).to(dtype=actions.dtype)
             returns_to_go = torch.cat(
                 [
                     torch.zeros(
@@ -376,7 +375,7 @@ class DecisionTransformer(TrajectoryModel):
                     returns_to_go,
                 ],
                 dim=1,
-            ).to(dtype=torch.float32)
+            ).to(dtype=returns_to_go.dtype)
             timesteps = torch.cat(
                 [
                     torch.zeros(

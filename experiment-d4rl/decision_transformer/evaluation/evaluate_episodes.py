@@ -12,6 +12,7 @@ def evaluate_episode(
     model,
     max_ep_len=1000,
     device="cuda",
+    float_dtype=torch.float32,
     target_return=None,
     mode="normal",
     state_mean=0.0,
@@ -21,8 +22,8 @@ def evaluate_episode(
     model.eval()
     model.to(device=device)
 
-    state_mean = torch.from_numpy(state_mean).to(device=device)
-    state_std = torch.from_numpy(state_std).to(device=device)
+    state_mean = torch.from_numpy(state_mean).to(dtype=float_dtype, device=device)
+    state_std = torch.from_numpy(state_std).to(dtype=float_dtype, device=device)
 
     state = env.reset()
 
@@ -31,11 +32,11 @@ def evaluate_episode(
     states = (
         torch.from_numpy(state)
         .reshape(1, state_dim)
-        .to(device=device, dtype=torch.float32)
+        .to(device=device, dtype=float_dtype)
     )
-    actions = torch.zeros((0, act_dim), device=device, dtype=torch.float32)
-    rewards = torch.zeros(0, device=device, dtype=torch.float32)
-    target_return = torch.tensor(target_return, device=device, dtype=torch.float32)
+    actions = torch.zeros((0, act_dim), device=device, dtype=float_dtype)
+    rewards = torch.zeros(0, device=device, dtype=float_dtype)
+    target_return = torch.tensor(target_return, device=device, dtype=float_dtype)
     sim_states = []
 
     episode_return, episode_length = 0, 0
@@ -46,9 +47,9 @@ def evaluate_episode(
         rewards = torch.cat([rewards, torch.zeros(1, device=device)])
 
         action = model.get_action(
-            (states.to(dtype=torch.float32) - state_mean) / state_std,
-            actions.to(dtype=torch.float32),
-            rewards.to(dtype=torch.float32),
+            (states.to(dtype=float_dtype) - state_mean) / state_std,
+            actions.to(dtype=float_dtype),
+            rewards.to(dtype=float_dtype),
             target_return=target_return,
         )
         actions[-1] = action
@@ -79,6 +80,7 @@ def evaluate_episode_rtg(
     state_mean=0.0,
     state_std=1.0,
     device="cuda",
+    float_dtype=torch.float32,
     target_return=None,
     mode="normal",
     record_video=False,
@@ -88,8 +90,8 @@ def evaluate_episode_rtg(
     model.eval()
     model.to(device=device)
 
-    state_mean = torch.from_numpy(state_mean).to(device=device)
-    state_std = torch.from_numpy(state_std).to(device=device)
+    state_mean = torch.from_numpy(state_mean).to(dtype=float_dtype, device=device)
+    state_std = torch.from_numpy(state_std).to(dtype=float_dtype, device=device)
 
     state = env.reset()
 
@@ -103,13 +105,13 @@ def evaluate_episode_rtg(
     states = (
         torch.from_numpy(state)
         .reshape(1, state_dim)
-        .to(device=device, dtype=torch.float32)
+        .to(device=device, dtype=float_dtype)
     )
-    actions = torch.zeros((0, act_dim), device=device, dtype=torch.float32)
-    rewards = torch.zeros(0, device=device, dtype=torch.float32)
+    actions = torch.zeros((0, act_dim), device=device, dtype=float_dtype)
+    rewards = torch.zeros(0, device=device, dtype=float_dtype)
 
     ep_return = target_return
-    target_return = torch.tensor(ep_return, device=device, dtype=torch.float32).reshape(
+    target_return = torch.tensor(ep_return, device=device, dtype=float_dtype).reshape(
         1, 1
     )
     timesteps = torch.tensor(0, device=device, dtype=torch.long).reshape(1, 1)
@@ -124,10 +126,10 @@ def evaluate_episode_rtg(
         rewards = torch.cat([rewards, torch.zeros(1, device=device)])
 
         action = model.get_action(
-            (states.to(dtype=torch.float32) - state_mean) / state_std,
-            actions.to(dtype=torch.float32),
-            rewards.to(dtype=torch.float32),
-            target_return.to(dtype=torch.float32),
+            (states.to(dtype=float_dtype) - state_mean) / state_std,
+            actions.to(dtype=float_dtype),
+            rewards.to(dtype=float_dtype),
+            target_return.to(dtype=float_dtype),
             timesteps.to(dtype=torch.long),
         )
         actions[-1] = action

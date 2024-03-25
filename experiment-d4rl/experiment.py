@@ -218,6 +218,11 @@ def experiment(
     # used to reweight sampling so we sample according to timesteps instead of trajectories
     p_sample = traj_lens[sorted_inds] / sum(traj_lens[sorted_inds])
 
+    if variant["fp16"] == True:
+        float_dtype = torch.float16
+    else:
+        float_dtype = torch.float32
+
     def get_batch(batch_size=256, max_len=K):
         batch_inds = np.random.choice(
             np.arange(num_trajectories),
@@ -276,10 +281,10 @@ def experiment(
                 )
             )
 
-        if variant["fp16"] == True:
-            float_dtype = torch.float16
-        else:
-            float_dtype = torch.float32
+        # if variant["fp16"] == True:
+        #     float_dtype = torch.float16
+        # else:
+        #     float_dtype = torch.float32
         
         s = torch.from_numpy(np.concatenate(s, axis=0)).to(
             dtype=float_dtype, device=device
@@ -332,6 +337,7 @@ def experiment(
                             state_mean=state_mean,
                             state_std=state_std,
                             device=device,
+                            float_dtype=float_dtype,
                             record_video = record_video,
                             video_path = video_path,
                         )
@@ -347,6 +353,7 @@ def experiment(
                             state_mean=state_mean,
                             state_std=state_std,
                             device=device,
+                            float_dtype=float_dtype,
                         )
                 returns.append(ret)
                 lengths.append(length)
@@ -466,6 +473,7 @@ def experiment(
     logger.info(f"Frozen parameters: {frozen_param_size}")
     logger.info(f"Trainable ratio: {trainable_param_size/(trainable_param_size + frozen_param_size)}")
     
+    model.half() if variant["fp16"] else model.float()
     model = model.to(device=device)
 
     warmup_steps = variant["warmup_steps"]
