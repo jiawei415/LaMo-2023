@@ -35,7 +35,7 @@ class SequenceTrainer(Trainer):
             None,
         )
 
-        if self.model.use_llm and self.args["co_training"]:
+        if self.args["co_training"]:
             batch = next(self.train_nlp_dataset)
             lm_out = self.model.transformer_model(**batch)
             lm_loss = lm_out.loss
@@ -57,4 +57,4 @@ class SequenceTrainer(Trainer):
                 torch.mean((action_preds - action_target) ** 2).detach().cpu().item()
             )
 
-        return loss.detach().cpu().item(), lm_loss.detach().cpu().item() if self.model.use_llm else 0
+        return loss.detach().cpu().item(), lm_loss.detach().cpu().item() if self.args["co_training"] else 0
