@@ -45,29 +45,28 @@ class DecisionTransformer(TrajectoryModel):
         super().__init__(state_dim, act_dim, max_length=max_length)
 
         self.hidden_size = hidden_size
-        
+
+        base_path = "/apdcephfs/share_1563664/ztjiaweixu/huggingface"
         if args["pretrained_lm"] is not None:
-            print("Loading from pretrained "+args["pretrained_lm"]+" model")
             if args['lora']:
-                name_or_path = f"/apdcephfs/share_1563664/ztjiaweixu/huggingface/{args['pretrained_lm']}_lora"
+                name_or_path = f"{base_path}/pretrain_{args['pretrained_lm']}_lora"
                 config = GPT2Config_LoRA.from_pretrained(name_or_path)
                 self.transformer_model = GPT2LMHeadModel_LoRA.from_pretrained(
                     name_or_path, config=config
                 )
             else:
-                name_or_path = f"/apdcephfs/share_1563664/ztjiaweixu/huggingface/{args['pretrained_lm']}"
+                name_or_path = f"{base_path}/pretrain_{args['pretrained_lm']}"
                 config = transformers.GPT2Config.from_pretrained(name_or_path)
                 config.resid_pdrop = args["dropout"]
                 self.transformer_model = GPT2LMHeadModel.from_pretrained(
                     name_or_path, config=config,
                 )
-            # config.save_pretrained(args['pretrained_lm'])
-            # self.transformer_model.save_pretrained(args['pretrained_lm'])
             hidden_size = config.n_embd
             self.hidden_size = config.n_embd
         else:
             if args['lora']:
-                config = GPT2Config_LoRA.from_pretrained("gpt2")
+                name_or_path = f"{base_path}/gpt2_lora"
+                config = GPT2Config_LoRA.from_pretrained(name_or_path)
                 self.transformer_model = GPT2LMHeadModel_LoRA(config)
             else:
                 config = transformers.GPT2Config(
@@ -80,6 +79,8 @@ class DecisionTransformer(TrajectoryModel):
                 self.transformer_model = GPT2LMHeadModel(config)
             hidden_size = config.n_embd
             self.hidden_size = config.n_embd
+        # config.save_pretrained("temp")
+        # self.transformer_model.save_pretrained("temp")
 
         if args["extend_positions"] and max_ep_len > config.n_positions:
             current_max_pos, embed_size = self.transformer.wpe.weight.shape
