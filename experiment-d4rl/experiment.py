@@ -29,7 +29,8 @@ from attack import attack_dataset
 
 
 def load_d4rl_dataset(variant, logger):
-    env_name = f"{variant['env']}-{variant['dataset']}-v2"
+    v = "v0" if variant['env'].startswith("kitchen") else "v2"
+    env_name = f"{variant['env']}-{variant['dataset']}-{v}"
     h5path = (
         variant["dataset_path"]
         if variant["dataset_path"] is None
@@ -61,7 +62,7 @@ def load_d4rl_dataset(variant, logger):
             "actions",
             "rewards",
             "terminals",
-            "next_observations"
+            # "next_observations"
         ]:
             data_[k].append(dataset[k][i])
         if done_bool or final_timestep:
@@ -109,10 +110,13 @@ def experiment(
     if variant["co_training"]:
         logger.info("co training with lambda="+str(variant["co_lambda"]))
         
-    train_nlp_dataloader, eval_nlp_dataloader = get_dataset(
-        dataset_name=variant["nlp_dataset_name"],
-        dataset_config_name=variant["nlp_dataset_config_name"]
-    )
+    if variant['co_training']:
+        train_nlp_dataloader, eval_nlp_dataloader = get_dataset(
+            dataset_name=variant["nlp_dataset_name"],
+            dataset_config_name=variant["nlp_dataset_config_name"]
+        )
+    else:
+        train_nlp_dataloader, eval_nlp_dataloader = None, None
     
     env_name, dataset = variant["env"], variant["dataset"]
     model_type = variant["model_type"]
@@ -145,7 +149,7 @@ def experiment(
     elif env_name == "kitchen":
         env = gym.make("kitchen-complete-v0")
         max_ep_len = 1000
-        env_targets = [5, 4, 3, 2, 1]
+        env_targets = [5, 4]
         scale = 1.0
     else:
         raise NotImplementedError
@@ -546,7 +550,7 @@ if __name__ == "__main__":
     parser.add_argument("--env", type=str, default="hopper")
     parser.add_argument(
         "--dataset", type=str, default="medium"
-    )  # medium, medium-replay, medium-expert, expert
+    )  # medium, medium-replay, medium-expert, expert, complete, partial, mixed
     parser.add_argument(
         "--mode", type=str, default="normal"
     )  # normal for standard setting, delayed for sparse

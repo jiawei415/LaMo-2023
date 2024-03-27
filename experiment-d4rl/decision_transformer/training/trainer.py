@@ -34,8 +34,9 @@ class Trainer:
         self.diagnostics = dict()
         self.eval_only = eval_only
         self.save_model = save_model
-        self.eval_nlp_dataset = cycle(iter(eval_nlp_dataset))
-        self.train_nlp_dataset = cycle(iter(train_nlp_dataset))
+        if args["co_training"]:
+            self.eval_nlp_dataset = cycle(iter(eval_nlp_dataset))
+            self.train_nlp_dataset = cycle(iter(train_nlp_dataset))
 
         self.start_time = time.time()
 
